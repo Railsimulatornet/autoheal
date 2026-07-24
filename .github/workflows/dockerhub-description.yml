@@ -1,0 +1,39 @@
+name: Docker Hub Description
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - DOCKERHUB_README.md
+      - .github/workflows/dockerhub-description.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  update-description:
+    runs-on: ubuntu-latest
+    env:
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Update Docker Hub description
+        if: env.DOCKERHUB_USERNAME != '' && env.DOCKERHUB_TOKEN != ''
+        uses: peter-evans/dockerhub-description@v5
+        with:
+          username: ${{ env.DOCKERHUB_USERNAME }}
+          password: ${{ env.DOCKERHUB_TOKEN }}
+          repository: railsimulatornet/autoheal
+          short-description: Lightweight Docker health monitor with cooldown and restart-loop protection.
+          readme-filepath: ./DOCKERHUB_README.md
+          enable-url-completion: true
+
+      - name: Explain skipped update
+        if: env.DOCKERHUB_USERNAME == '' || env.DOCKERHUB_TOKEN == ''
+        run: echo "Docker Hub description update skipped because repository secrets are not configured."

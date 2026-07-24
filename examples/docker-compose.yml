@@ -1,0 +1,36 @@
+services:
+  autoheal:
+    image: railsimulatornet/autoheal:1.0.0
+    container_name: autoheal
+    restart: unless-stopped
+    environment:
+      TZ: Europe/Berlin
+      AUTOHEAL_CONTAINER_LABEL: autoheal
+      AUTOHEAL_CONTAINER_LABEL_VALUE: "true"
+      AUTOHEAL_INTERVAL: "30"
+      AUTOHEAL_START_PERIOD: "120"
+      AUTOHEAL_DEFAULT_STOP_TIMEOUT: "10"
+      AUTOHEAL_COOLDOWN: "300"
+      AUTOHEAL_MAX_RESTARTS: "3"
+      AUTOHEAL_RESTART_WINDOW: "1800"
+      AUTOHEAL_DRY_RUN: "false"
+      AUTOHEAL_LOG_LEVEL: info
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - autoheal_state:/state
+
+  example:
+    image: nginx:alpine
+    restart: unless-stopped
+    labels:
+      autoheal: "true"
+      autoheal.stop.timeout: "10"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "--quiet", "http://127.0.0.1/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+volumes:
+  autoheal_state:

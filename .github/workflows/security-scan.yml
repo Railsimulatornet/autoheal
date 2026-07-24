@@ -1,0 +1,105 @@
+name: Security Scan
+
+on:
+  pull_request:
+    paths:
+      - Dockerfile
+      - autoheal.sh
+      - healthcheck.sh
+      - VERSION
+      - .github/workflows/security-scan.yml
+  push:
+    branches:
+      - main
+    paths:
+      - Dockerfile
+      - autoheal.sh
+      - healthcheck.sh
+      - VERSION
+      - .github/workflows/security-scan.yml
+  schedule:
+    - cron: "17 4 * * 0"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  security:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Validate shell syntax
+        run: |
+          set -euo pipefail
+          sh -n autoheal.sh
+          sh -n healthcheck.sh
+
+      - name: Install ShellCheck
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes shellcheck
+
+      - name: Run ShellCheck
+        run: shellcheck autoheal.sh healthcheck.sh
+
+      - name: Build test image
+        run: |
+          set -euo pipefail
+          docker build \
+            --pull \
+            --no-cache \
+            --build-arg VERSION=ci \
+            --tag autoheal:ci \
+            .
+
+      - name: Smoke-test container health
+        run: |
+          set -euo pipefail
+
+          cleanup() {
+            docker rm -f autoheal-ci >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+
+          docker run -d \
+            --name autoheal-ci \
+            --restart=no \
+            --health-interval=2s \
+            --health-timeout=2s \
+            --health-start-period=0s \
+            --health-retries=3 \
+            -e AUTOHEAL_CONTAINER_LABEL=autoheal-ci-test \
+            -e AUTOHEAL_CONTAINER_LABEL_VALUE=true \
+            -e AUTOHEAL_INTERVAL=2 \
+            -e AUTOHEAL_START_PERIOD=0 \
+            -e AUTOHEAL_DRY_RUN=true \
+            -e AUTOHEAL_LOG_LEVEL=debug \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            autoheal:ci
+
+          sleep 10
+          docker logs autoheal-ci
+
+          health="$(docker inspect autoheal-ci --format '{{.State.Health.Status}}')"
+          test "$health" = "healthy"
+
+      - name: Scan image with Trivy
+        run: |
+          set -euo pipefail
+          docker run --rm \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            -v "${HOME}/.cache/trivy:/root/.cache/trivy" \
+            ghcr.io/aquasecurity/trivy:latest \
+            image \
+            --image-src docker \
+            --scanners vuln \
+            --pkg-types os,library \
+            --severity CRITICAL,HIGH \
+            --ignore-unfixed \
+            --exit-code 1 \
+            --format table \
+            autoheal:ci

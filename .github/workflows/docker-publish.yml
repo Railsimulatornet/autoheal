@@ -1,0 +1,293 @@
+name: Docker Image
+
+on:
+  pull_request:
+    paths:
+      - Dockerfile
+      - autoheal.sh
+      - healthcheck.sh
+      - VERSION
+      - .github/workflows/docker-publish.yml
+  push:
+    branches:
+      - main
+    paths:
+      - Dockerfile
+      - autoheal.sh
+      - healthcheck.sh
+      - VERSION
+      - .github/workflows/docker-publish.yml
+  workflow_dispatch:
+    inputs:
+      republish:
+        description: Republish the current VERSION even when its tag already exists
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Validate source and version
+        shell: bash
+        run: |
+          set -euo pipefail
+          sh -n autoheal.sh
+          sh -n healthcheck.sh
+
+          version="$(tr -d '[:space:]' < VERSION)"
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "VERSION must contain a semantic version such as 1.0.0 or 1.0.0-rc1." >&2
+            exit 1
+          fi
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Verify multi-architecture build
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64,linux/arm64
+          pull: true
+          no-cache: true
+          push: false
+          build-args: |
+            VERSION=ci
+
+  prepare:
+    if: github.event_name != 'pull_request'
+    needs: validate
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      publish: ${{ steps.release.outputs.publish }}
+      version: ${{ steps.release.outputs.version }}
+      tag: ${{ steps.release.outputs.tag }}
+      prerelease: ${{ steps.release.outputs.prerelease }}
+      ghcr_tags: ${{ steps.release.outputs.ghcr_tags }}
+      dockerhub_tags: ${{ steps.release.outputs.dockerhub_tags }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Prepare release metadata
+        id: release
+        shell: bash
+        env:
+          FORCE_REPUBLISH: ${{ github.event_name == 'workflow_dispatch' && inputs.republish }}
+        run: |
+          set -euo pipefail
+
+          version="$(tr -d '[:space:]' < VERSION)"
+          tag="v${version}"
+          prerelease=false
+
+          if [[ "$version" == *-* ]]; then
+            prerelease=true
+          fi
+
+          tag_exists=false
+          if git ls-remote --exit-code --tags origin "refs/tags/${tag}" >/dev/null 2>&1; then
+            tag_exists=true
+          fi
+
+          publish=false
+          if [[ "$tag_exists" == false || "$FORCE_REPUBLISH" == true ]]; then
+            publish=true
+          fi
+
+          ghcr_tags="ghcr.io/railsimulatornet/autoheal:${version}"
+          dockerhub_tags="railsimulatornet/autoheal:${version}"
+
+          if [[ "$prerelease" == false ]]; then
+            minor="${version%.*}"
+            ghcr_tags+=$'\n'"ghcr.io/railsimulatornet/autoheal:${minor}"
+            ghcr_tags+=$'\n'"ghcr.io/railsimulatornet/autoheal:latest"
+            dockerhub_tags+=$'\n'"railsimulatornet/autoheal:${minor}"
+            dockerhub_tags+=$'\n'"railsimulatornet/autoheal:latest"
+          fi
+
+          {
+            echo "publish=${publish}"
+            echo "version=${version}"
+            echo "tag=${tag}"
+            echo "prerelease=${prerelease}"
+            echo "ghcr_tags<<EOF"
+            printf '%s\n' "$ghcr_tags"
+            echo "EOF"
+            echo "dockerhub_tags<<EOF"
+            printf '%s\n' "$dockerhub_tags"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+          echo "Version: ${version}"
+          echo "Pre-release: ${prerelease}"
+          echo "Tag exists: ${tag_exists}"
+          echo "Publish: ${publish}"
+
+  publish:
+    if: needs.prepare.outputs.publish == 'true'
+    needs:
+      - validate
+      - prepare
+    runs-on: ubuntu-latest
+    env:
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and publish to GitHub Container Registry
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64,linux/arm64
+          pull: true
+          no-cache: true
+          push: true
+          tags: ${{ needs.prepare.outputs.ghcr_tags }}
+          labels: |
+            org.opencontainers.image.version=${{ needs.prepare.outputs.version }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          build-args: |
+            VERSION=${{ needs.prepare.outputs.version }}
+          provenance: mode=max
+          sbom: true
+
+      - name: Log in to Docker Hub
+        if: env.DOCKERHUB_USERNAME != '' && env.DOCKERHUB_TOKEN != ''
+        uses: docker/login-action@v4
+        with:
+          username: ${{ env.DOCKERHUB_USERNAME }}
+          password: ${{ env.DOCKERHUB_TOKEN }}
+
+      - name: Build and publish to Docker Hub
+        if: env.DOCKERHUB_USERNAME != '' && env.DOCKERHUB_TOKEN != ''
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64,linux/arm64
+          pull: true
+          no-cache: true
+          push: true
+          tags: ${{ needs.prepare.outputs.dockerhub_tags }}
+          labels: |
+            org.opencontainers.image.version=${{ needs.prepare.outputs.version }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          build-args: |
+            VERSION=${{ needs.prepare.outputs.version }}
+          provenance: mode=max
+          sbom: true
+
+      - name: Explain skipped Docker Hub publication
+        if: env.DOCKERHUB_USERNAME == '' || env.DOCKERHUB_TOKEN == ''
+        run: echo "Docker Hub publication skipped because DOCKERHUB_USERNAME or DOCKERHUB_TOKEN is not configured."
+
+      - name: Create GitHub pre-release or release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+          PRERELEASE: ${{ needs.prepare.outputs.prerelease }}
+        run: |
+          set -euo pipefail
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release ${TAG} already exists."
+            exit 0
+          fi
+
+          if [[ "$PRERELEASE" == true ]]; then
+            de_intro="Release Candidate von Autoheal."
+            en_intro="Release candidate of Autoheal."
+            de_usage="Bitte für produktive Tests ausschließlich den festen Tag \`${VERSION}\` verwenden."
+            en_usage="Use the fixed \`${VERSION}\` tag for production testing."
+          else
+            de_intro="Stabile Veröffentlichung von Autoheal."
+            en_intro="Stable release of Autoheal."
+            de_usage="Verfügbare Image-Tags: \`${VERSION}\`, \`${VERSION%.*}\` und \`latest\`."
+            en_usage="Available image tags: \`${VERSION}\`, \`${VERSION%.*}\` and \`latest\`."
+          fi
+
+          cat > release-notes.md <<EOF
+          ## Deutsch
+
+          ${de_intro}
+
+          - kontrollierte Neustarts für Docker-Container mit dem Zustand \`unhealthy\`
+          - Cooldown und persistentes Neustartlimit gegen Endlosschleifen
+          - Dry-Run-Modus
+          - individuelles Stop-Timeout über \`autoheal.stop.timeout\`
+          - eigener Healthcheck
+          - Multi-Arch-Images für AMD64 und ARM64
+          - automatisierte Shell-, Build- und Trivy-Prüfungen
+
+          ${de_usage}
+
+          ## English
+
+          ${en_intro}
+
+          - controlled restarts for Docker containers in the \`unhealthy\` state
+          - cooldown and persistent restart limits to prevent endless loops
+          - dry-run mode
+          - per-container stop timeout through \`autoheal.stop.timeout\`
+          - built-in healthcheck
+          - multi-architecture images for AMD64 and ARM64
+          - automated shell, build and Trivy checks
+
+          ${en_usage}
+          EOF
+
+          args=(
+            "$TAG"
+            --target "$GITHUB_SHA"
+            --title "Autoheal ${VERSION}"
+            --notes-file release-notes.md
+          )
+
+          if [[ "$PRERELEASE" == true ]]; then
+            args+=(--prerelease)
+          else
+            args+=(--latest)
+          fi
+
+          gh release create "${args[@]}"
