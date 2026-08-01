@@ -1,0 +1,125 @@
+name: Docker Image
+
+on:
+  pull_request:
+    paths:
+      - Dockerfile
+      - autoheal.sh
+      - healthcheck.sh
+      - VERSION
+      - .github/workflows/docker-publish.yml
+  push:
+    branches:
+      - main
+    paths:
+      - Dockerfile
+      - autoheal.sh
+      - healthcheck.sh
+      - VERSION
+      - .github/workflows/docker-publish.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Validate source and stable version
+        shell: bash
+        run: |
+          set -euo pipefail
+          sh -n autoheal.sh
+          sh -n healthcheck.sh
+          version="$(tr -d '[:space:]' < VERSION)"
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+
+      - uses: docker/setup-qemu-action@v4
+      - uses: docker/setup-buildx-action@v4
+
+      - name: Verify AMD64 and ARM64 build
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64,linux/arm64
+          pull: true
+          no-cache: true
+          push: false
+          build-args: VERSION=ci
+
+  publish:
+    if: github.event_name != 'pull_request'
+    needs: validate
+    runs-on: ubuntu-latest
+    env:
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Read version
+        id: version
+        shell: bash
+        run: echo "value=$(tr -d '[:space:]' < VERSION)" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-qemu-action@v4
+      - uses: docker/setup-buildx-action@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish GHCR image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64,linux/arm64
+          pull: true
+          no-cache: true
+          push: true
+          tags: |
+            ghcr.io/railsimulatornet/autoheal:latest
+            ghcr.io/railsimulatornet/autoheal:${{ steps.version.outputs.value }}
+          labels: |
+            org.opencontainers.image.version=${{ steps.version.outputs.value }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          build-args: VERSION=${{ steps.version.outputs.value }}
+          provenance: mode=max
+          sbom: true
+
+      - name: Log in to Docker Hub
+        if: env.DOCKERHUB_USERNAME != '' && env.DOCKERHUB_TOKEN != ''
+        uses: docker/login-action@v4
+        with:
+          username: ${{ env.DOCKERHUB_USERNAME }}
+          password: ${{ env.DOCKERHUB_TOKEN }}
+
+      - name: Publish Docker Hub image
+        if: env.DOCKERHUB_USERNAME != '' && env.DOCKERHUB_TOKEN != ''
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64,linux/arm64
+          pull: true
+          no-cache: true
+          push: true
+          tags: |
+            railsimulatornet/autoheal:latest
+            railsimulatornet/autoheal:${{ steps.version.outputs.value }}
+          labels: |
+            org.opencontainers.image.version=${{ steps.version.outputs.value }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          build-args: VERSION=${{ steps.version.outputs.value }}
+          provenance: mode=max
+          sbom: true

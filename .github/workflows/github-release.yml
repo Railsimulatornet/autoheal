@@ -1,0 +1,155 @@
+name: GitHub Release
+
+on:
+  pull_request:
+    paths:
+      - VERSION
+      - .github/workflows/github-release.yml
+  push:
+    branches:
+      - main
+    paths:
+      - VERSION
+      - .github/workflows/github-release.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    env:
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Validate stable version
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(tr -d '[:space:]' < VERSION)"
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "VERSION must contain a stable X.Y.Z version." >&2
+            exit 1
+          fi
+          echo "value=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Prepare bilingual release notes
+        if: github.event_name != 'pull_request'
+        shell: bash
+        env:
+          VERSION: ${{ steps.version.outputs.value }}
+        run: |
+          cat > release-notes.md <<EOF
+          ## Deutsch
+
+          Stabile Veröffentlichung von Autoheal.
+
+          - kontrollierte Neustarts für Docker-Container mit dem Zustand \`unhealthy\`
+          - Cooldown und persistentes Neustartlimit gegen Endlosschleifen
+          - Dry-Run-Modus
+          - individuelles Stop-Timeout über \`autoheal.stop.timeout\`
+          - eigener Healthcheck
+          - Multi-Arch-Images für AMD64 und ARM64
+          - automatisierte Shell-, Build- und Trivy-Prüfungen
+
+          Verfügbare Image-Tags: \`latest\` als Standard und \`${VERSION}\` als feste Version.
+
+          ## English
+
+          Stable release of Autoheal.
+
+          - controlled restarts for Docker containers in the \`unhealthy\` state
+          - cooldown and persistent restart limits to prevent endless loops
+          - dry-run mode
+          - per-container stop timeout through \`autoheal.stop.timeout\`
+          - built-in healthcheck
+          - multi-architecture images for AMD64 and ARM64
+          - automated shell, build and Trivy checks
+
+          Available image tags: \`latest\` as the default and \`${VERSION}\` as the fixed version.
+          EOF
+
+      - name: Create or update stable GitHub release
+        if: github.event_name != 'pull_request'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.version.outputs.value }}
+        run: |
+          set -euo pipefail
+          tag="v${VERSION}"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release edit "$tag" \
+              --title "Autoheal ${VERSION}" \
+              --notes-file release-notes.md \
+              --latest
+          else
+            gh release create "$tag" \
+              --target "$GITHUB_SHA" \
+              --title "Autoheal ${VERSION}" \
+              --notes-file release-notes.md \
+              --latest
+          fi
+
+      - name: Remove obsolete release candidate
+        if: github.event_name != 'pull_request'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          if gh release view v0.1.0-rc1 >/dev/null 2>&1; then
+            gh release delete v0.1.0-rc1 --cleanup-tag --yes
+          elif git ls-remote --exit-code --tags origin refs/tags/v0.1.0-rc1 >/dev/null 2>&1; then
+            git push origin :refs/tags/v0.1.0-rc1
+          fi
+
+      - name: Update GitHub repository description
+        if: github.event_name != 'pull_request'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh api --method PATCH "repos/${GITHUB_REPOSITORY}" \
+            -f description='Lightweight Docker health monitor with cooldown and restart-loop protection.'
+
+      - name: Remove obsolete Docker Hub 1.0 tag
+        if: github.event_name != 'pull_request' && env.DOCKERHUB_USERNAME != '' && env.DOCKERHUB_TOKEN != ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          token="$(
+            curl --fail --silent --show-error \
+              --request POST \
+              --header 'Content-Type: application/json' \
+              --data "{\"username\":\"${DOCKERHUB_USERNAME}\",\"password\":\"${DOCKERHUB_TOKEN}\"}" \
+              https://hub.docker.com/v2/users/login/ \
+              | jq --raw-output '.token'
+          )"
+
+          status="$(
+            curl --silent --show-error \
+              --output /tmp/dockerhub-delete-response \
+              --write-out '%{http_code}' \
+              --request DELETE \
+              --header "Authorization: Bearer ${token}" \
+              https://hub.docker.com/v2/namespaces/railsimulatornet/repositories/autoheal/tags/1.0
+          )"
+
+          case "$status" in
+            204|404)
+              echo "Docker Hub tag 1.0 is absent."
+              ;;
+            *)
+              cat /tmp/dockerhub-delete-response >&2
+              echo "Unexpected Docker Hub status: $status" >&2
+              exit 1
+              ;;
+          esac

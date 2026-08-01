@@ -1,0 +1,13 @@
+.git
+.github
+examples
+*.md
+LICENSE
+VERSION
+*.log
+*.tar
+*.tar.gz
+state
+test-state
+restart-test-state
+source-backups

@@ -1,0 +1,37 @@
+name: Tag Policy Check
+
+on:
+  pull_request:
+    paths:
+      - README.md
+      - README_DE.md
+      - DOCKERHUB_README.md
+      - examples/docker-compose.yml
+      - .github/workflows/docker-publish.yml
+      - .github/workflows/tag-policy-check.yml
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Verify latest and fixed tag policy
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -Fq 'railsimulatornet/autoheal:latest' README.md
+          grep -Fq 'railsimulatornet/autoheal:latest' README_DE.md
+          grep -Fq 'railsimulatornet/autoheal:latest' DOCKERHUB_README.md
+          grep -Fq 'railsimulatornet/autoheal:latest' examples/docker-compose.yml
+          grep -Fq 'railsimulatornet/autoheal:latest' .github/workflows/docker-publish.yml
+          grep -Fq 'railsimulatornet/autoheal:${{ steps.version.outputs.value }}' .github/workflows/docker-publish.yml
+
+          if grep -R -E 'autoheal:1\.0([^.]|$)|current 1\.0|aktuelle 1\.0' \
+            README.md README_DE.md DOCKERHUB_README.md examples/docker-compose.yml \
+            .github/workflows/docker-publish.yml; then
+            echo 'Obsolete 1.0 series tag is still referenced.' >&2
+            exit 1
+          fi

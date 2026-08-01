@@ -1,0 +1,11 @@
+.DS_Store
+.env
+*.log
+*.tar
+*.tar.gz
+*.sha256
+state/
+test-state/
+restart-test-state/
+rollback-*/
+source-backups/
