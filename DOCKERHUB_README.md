@@ -43,8 +43,11 @@ Zu überwachende Container benötigen einen Healthcheck und das Label `autoheal=
 
 ### Image-Tags
 
-- `latest` – Standardtag und aktuelle stabile Version
-- `1.0.0` – fester stabiler Release
+- `latest` – Standardtag und aktueller geprüfter Build
+- `1.0.1` – fester stabiler Release
+- `1.0.1-build.20260927.42.1` – Beispiel für einen Wartungsbuild mit Datum und Buildnummer
+
+`latest` wird wöchentlich frisch gebaut. Beide Architekturen müssen die Prüfungen bestehen, bevor dasselbe Image auf Docker Hub und GHCR veröffentlicht wird. Feste Versionstags bleiben bei diesen Rebuilds unverändert.
 
 ## English
 
@@ -63,12 +66,15 @@ Autoheal monitors containers with a Docker healthcheck and restarts selected con
 
 ### Image tags
 
-- `latest` – default tag and current stable release
-- `1.0.0` – fixed stable release
+- `latest` – default tag and current verified build
+- `1.0.1` – fixed stable release
+- `1.0.1-build.20260927.42.1` – example maintenance build with date and build number
+
+`latest` is rebuilt weekly. Both architectures must pass the checks before the same image is published to Docker Hub and GHCR. Fixed version tags are not changed by these rebuilds.
 
 ### Security notice
 
-Mounting the Docker socket gives the container extensive control over the Docker daemon and effectively the host. Use trusted images. Select `latest` for the normal installation or `1.0.0` for a reproducible deployment.
+Mounting the Docker socket gives the container extensive control over the Docker daemon and effectively the host. Use trusted images. Select `latest` for the normal installation or `1.0.1` for a fixed image version.
 
 Full documentation and source code:
 

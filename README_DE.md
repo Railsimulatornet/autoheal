@@ -75,10 +75,13 @@ Autoheal erkennt dann passende Container und protokolliert die vorgesehene Aktio
 
 ## Image-Tags
 
-- `latest` – Standardtag und aktuelle stabile Version
-- `1.0.0` – fester stabiler Release
+- `latest` – Standardtag und aktueller geprüfter Build
+- `1.0.1` – fester stabiler Release
+- `1.0.1-build.20260927.42.1` – Beispiel für einen Wartungsbuild mit Datum und Buildnummer
 
-`latest` ist für die normale Installation vorgesehen. Für vollständig reproduzierbare Installationen kann stattdessen `1.0.0` verwendet werden.
+`latest` wird einmal pro Woche frisch gebaut und nur nach bestandenen Prüfungen für AMD64 und ARM64 veröffentlicht. Der feste Versionstag `1.0.1` bleibt bei diesen Rebuilds unverändert.
+
+Bestehende Nutzer können das Projekt in der UGOS-Docker-App neu bereitstellen und dabei **Das neueste Image abrufen** aktivieren. Die eigene Compose-Konfiguration und die Daten unter `/state` bitte beibehalten. Ein neues Registry-Image aktualisiert den laufenden Container nicht automatisch.
 
 ## Sicherheit
 

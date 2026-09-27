@@ -69,7 +69,9 @@ class RuntimeTests(unittest.TestCase):
                'DOCKER_SOCK': '/fixture/daemon.sock', 'MOCK_NOW': str(self.now)}
         env.update(overrides)
         name = 'autoheal-fixture-' + uuid.uuid4().hex
+        # Match the fixture owner's UID/GID; no DAC override or relaxed file permissions.
         command = ['docker', 'run', '--rm', '--name', name, '--network', 'none', '--read-only',
+                   '--user', f'{os.getuid()}:{os.getgid()}',
                    '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges',
                    '--platform', PLATFORM, '--mount', f'type=bind,src={self.root},dst=/fixture']
         for key, value in env.items():
