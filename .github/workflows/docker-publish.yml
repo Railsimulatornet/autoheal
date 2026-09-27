@@ -2,124 +2,97 @@ name: Docker Image
 
 on:
   pull_request:
-    paths:
-      - Dockerfile
-      - autoheal.sh
-      - healthcheck.sh
-      - VERSION
-      - .github/workflows/docker-publish.yml
+    paths: ['Dockerfile', '.dockerignore', 'autoheal.sh', 'healthcheck.sh', 'VERSION', '.github/**', 'README*.md', 'DOCKERHUB_README.md', 'examples/**']
   push:
-    branches:
-      - main
-    paths:
-      - Dockerfile
-      - autoheal.sh
-      - healthcheck.sh
-      - VERSION
-      - .github/workflows/docker-publish.yml
+    branches: [main]
+    tags: ['v*']
+    paths: ['Dockerfile', '.dockerignore', 'autoheal.sh', 'healthcheck.sh', 'VERSION', '.github/**']
+  schedule:
+    - cron: '17 4 * * 0'
   workflow_dispatch:
 
 permissions:
-  contents: write
-  packages: write
+  contents: read
+
+concurrency:
+  group: autoheal-pipeline-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  validate:
+  metadata:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+      build_version: ${{ steps.meta.outputs.build_version }}
+      release: ${{ steps.meta.outputs.release }}
+      publish: ${{ steps.meta.outputs.publish }}
+      tag: ${{ steps.meta.outputs.tag }}
     steps:
       - uses: actions/checkout@v7
-
-      - name: Validate source and stable version
-        shell: bash
-        run: |
-          set -euo pipefail
-          sh -n autoheal.sh
-          sh -n healthcheck.sh
-          version="$(tr -d '[:space:]' < VERSION)"
-          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
-
-      - uses: docker/setup-qemu-action@v4
-      - uses: docker/setup-buildx-action@v4
-
-      - name: Verify AMD64 and ARM64 build
-        uses: docker/build-push-action@v7
         with:
-          context: .
-          file: ./Dockerfile
-          platforms: linux/amd64,linux/arm64
-          pull: true
-          no-cache: true
-          push: false
-          build-args: VERSION=ci
+          persist-credentials: false
+      - name: Check release metadata and tag policy
+        shell: bash
+        run: bash .github/scripts/check-tag-policy.sh
+      - name: Read release and build metadata
+        id: meta
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python3 .github/scripts/release_metadata.py
+
+  security:
+    needs: metadata
+    uses: ./.github/workflows/security-scan.yml
+    permissions:
+      contents: read
+      security-events: write
+    with:
+      build_version: ${{ needs.metadata.outputs.build_version }}
 
   publish:
-    if: github.event_name != 'pull_request'
-    needs: validate
+    needs: [metadata, security]
+    if: ${{ needs.metadata.outputs.publish == 'true' }}
     runs-on: ubuntu-latest
-    env:
-      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
-      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
-
+    timeout-minutes: 15
+    concurrency:
+      group: autoheal-registry-publication
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      packages: write
     steps:
       - uses: actions/checkout@v7
-
-      - name: Read version
-        id: version
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v7
+        with:
+          name: autoheal-verified-image
+          path: ${{ runner.temp }}/autoheal-image
+      - name: Install registry copy tool on GitHub runner
         shell: bash
-        run: echo "value=$(tr -d '[:space:]' < VERSION)" >> "$GITHUB_OUTPUT"
+        run: |
+          set -Eeuo pipefail
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends skopeo
+      - name: Publish the verified image to both registries
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REGISTRY_USER: ${{ github.actor }}
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+          IMAGE_TAG: ${{ needs.metadata.outputs.tag }}
+        run: |
+          set -Eeuo pipefail
+          (cd "$RUNNER_TEMP/autoheal-image" && sha256sum --check image.sha256)
+          bash .github/scripts/publish-image.sh "$RUNNER_TEMP/autoheal-image/image.tar" "$IMAGE_TAG"
 
-      - uses: docker/setup-qemu-action@v4
-      - uses: docker/setup-buildx-action@v4
-
-      - name: Log in to GHCR
-        uses: docker/login-action@v4
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Publish GHCR image
-        uses: docker/build-push-action@v7
-        with:
-          context: .
-          file: ./Dockerfile
-          platforms: linux/amd64,linux/arm64
-          pull: true
-          no-cache: true
-          push: true
-          tags: |
-            ghcr.io/railsimulatornet/autoheal:latest
-            ghcr.io/railsimulatornet/autoheal:${{ steps.version.outputs.value }}
-          labels: |
-            org.opencontainers.image.version=${{ steps.version.outputs.value }}
-            org.opencontainers.image.revision=${{ github.sha }}
-          build-args: VERSION=${{ steps.version.outputs.value }}
-          provenance: mode=max
-          sbom: true
-
-      - name: Log in to Docker Hub
-        if: env.DOCKERHUB_USERNAME != '' && env.DOCKERHUB_TOKEN != ''
-        uses: docker/login-action@v4
-        with:
-          username: ${{ env.DOCKERHUB_USERNAME }}
-          password: ${{ env.DOCKERHUB_TOKEN }}
-
-      - name: Publish Docker Hub image
-        if: env.DOCKERHUB_USERNAME != '' && env.DOCKERHUB_TOKEN != ''
-        uses: docker/build-push-action@v7
-        with:
-          context: .
-          file: ./Dockerfile
-          platforms: linux/amd64,linux/arm64
-          pull: true
-          no-cache: true
-          push: true
-          tags: |
-            railsimulatornet/autoheal:latest
-            railsimulatornet/autoheal:${{ steps.version.outputs.value }}
-          labels: |
-            org.opencontainers.image.version=${{ steps.version.outputs.value }}
-            org.opencontainers.image.revision=${{ github.sha }}
-          build-args: VERSION=${{ steps.version.outputs.value }}
-          provenance: mode=max
-          sbom: true
+  release:
+    needs: [metadata, publish]
+    if: ${{ needs.metadata.outputs.release == 'true' }}
+    permissions:
+      contents: write
+    uses: ./.github/workflows/github-release.yml
+    with:
+      version: ${{ needs.metadata.outputs.version }}
