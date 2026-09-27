@@ -88,7 +88,7 @@ Die vollständige Beispieldatei befindet sich unter [`examples/docker-compose.ym
 
 Die häufig verwendeten Variablen `AUTOHEAL_CONTAINER_LABEL`, `AUTOHEAL_INTERVAL`, `AUTOHEAL_START_PERIOD` und `AUTOHEAL_DEFAULT_STOP_TIMEOUT` werden unterstützt.
 
-Version 1.0.0 unterstützt noch keine Webhooks, Apprise-Benachrichtigungen oder benutzerdefinierten Post-Restart-Skripte.
+Version 1.0.1 unterstützt noch keine Webhooks, Apprise-Benachrichtigungen oder benutzerdefinierten Post-Restart-Skripte.
 
 ### Sicherheitshinweis
 
@@ -101,9 +101,14 @@ Ausführliche Hinweise stehen in [`SECURITY.md`](SECURITY.md).
 - Docker Hub: `railsimulatornet/autoheal`
 - GitHub Container Registry: `ghcr.io/railsimulatornet/autoheal`
 - Standardtag: `latest`
-- fester Release: `1.0.0`
+- fester Release: `1.0.1`
+- Wartungsbuild, zum Beispiel: `1.0.1-build.20260927.42.1`
 
-`latest` ist für die normale Installation vorgesehen. Für vollständig reproduzierbare Installationen kann stattdessen der feste Tag `1.0.0` verwendet werden.
+`latest` ist für die normale Installation vorgesehen und wird einmal pro Woche frisch gebaut. Dabei werden beide Architekturen geprüft, bevor dasselbe Image in beiden Registries veröffentlicht wird. Ein fehlgeschlagener Test oder Sicherheitsscan verhindert die Veröffentlichung.
+
+Für einen festgelegten Image-Stand kann der Versionstag `1.0.1` verwendet werden. Wöchentliche Rebuilds überschreiben keine festen Versionstags. Die Commit-Zuordnung bleibt in den Image-Metadaten erhalten.
+
+Bestehende Compose-Einstellungen und Daten unter `/state` können unverändert weiterverwendet werden. Ein Image-Update in der Registry aktualisiert keine laufenden Container automatisch.
 
 ### Copyright
 
@@ -193,7 +198,7 @@ The complete example is available at [`examples/docker-compose.yml`](examples/do
 
 The commonly used variables `AUTOHEAL_CONTAINER_LABEL`, `AUTOHEAL_INTERVAL`, `AUTOHEAL_START_PERIOD` and `AUTOHEAL_DEFAULT_STOP_TIMEOUT` are supported.
 
-Version 1.0.0 does not yet support webhooks, Apprise notifications or custom post-restart scripts.
+Version 1.0.1 does not yet support webhooks, Apprise notifications or custom post-restart scripts.
 
 ### Security notice
 
@@ -206,9 +211,14 @@ See [`SECURITY.md`](SECURITY.md) for details.
 - Docker Hub: `railsimulatornet/autoheal`
 - GitHub Container Registry: `ghcr.io/railsimulatornet/autoheal`
 - default tag: `latest`
-- fixed release: `1.0.0`
+- fixed release: `1.0.1`
+- maintenance build example: `1.0.1-build.20260927.42.1`
 
-`latest` is intended for normal installations. Use the fixed `1.0.0` tag instead when full reproducibility is required.
+`latest` is intended for normal installations and is rebuilt weekly. Both architectures are checked before the same image is published to both registries. A failed test or security scan blocks publication.
+
+Use the `1.0.1` version tag to select a fixed image. Weekly rebuilds do not overwrite fixed version tags. Source commit information remains in the image metadata.
+
+Existing Compose settings and data under `/state` remain compatible. Publishing a new registry image does not automatically update running containers.
 
 ### Copyright
 

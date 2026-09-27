@@ -2,6 +2,20 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.0.1] - 2026-09-27
+
+### Security and maintenance
+
+- Connected image publication and GitHub releases to successful AMD64 and ARM64 security checks.
+- Docker Hub and GHCR now receive the same tested build instead of separate rebuilds.
+- Added weekly maintenance rebuilds with readable version-and-date tags; fixed release tags are not overwritten.
+- Added automated runtime and pipeline checks and weekly Dependabot updates.
+- Moved bilingual release notes into their own file and stopped rewriting published notes or deleting old tags during releases.
+
+### Compatibility
+
+- Monitoring, cooldown, restart limits, dry-run mode, healthcheck and Compose defaults remain unchanged.
+
 ## [1.0.0] - 2026-07-24
 
 ### Stable release
