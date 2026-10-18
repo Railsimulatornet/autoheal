@@ -1,5 +1,8 @@
 # Autoheal – Deutsche Dokumentation
 
+[![Docker Image](https://github.com/Railsimulatornet/autoheal/actions/workflows/docker-publish.yml/badge.svg?branch=main)](https://github.com/Railsimulatornet/autoheal/actions/workflows/docker-publish.yml)
+[![Security Scan](https://github.com/Railsimulatornet/autoheal/actions/workflows/security-scan.yml/badge.svg?branch=main)](https://github.com/Railsimulatornet/autoheal/actions/workflows/security-scan.yml)
+
 [Zur zweisprachigen Hauptdokumentation](README.md)
 
 Autoheal überwacht Docker-Container mit einem Healthcheck und startet passend markierte Container kontrolliert neu, sobald sie den Zustand `unhealthy` erreichen.
