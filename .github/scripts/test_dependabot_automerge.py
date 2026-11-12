@@ -79,6 +79,25 @@ def sample_api(require_pipeline=False):
     return a, head
 
 
+def add_skipped_target_test(api, sha):
+    """Reproduce GitHub's skipped read-only test job on pull_request_target."""
+    number = 42
+    api.lists[f'/repos/{api.repo}/commits/{sha}/check-runs'].append({
+        'id': 123456, 'name': 'test', 'status': 'completed',
+        'conclusion': 'skipped', 'app': {'slug': 'github-actions'},
+        'details_url': f'https://github.com/{api.repo}/actions/runs/{number}/job/123456',
+    })
+    path = f'/repos/{api.repo}/actions/runs/{number}'
+    api.data[path] = {
+        'event': 'pull_request_target',
+        'name': 'Dependabot patch auto-merge',
+        'path': '.github/workflows/dependabot-automerge.yml',
+        'head_sha': sha, 'status': 'completed', 'conclusion': 'success',
+        'pull_requests': [{'head': {'sha': sha}}],
+    }
+    return path
+
+
 class PatchValidation(unittest.TestCase):
     def test_tags_patch_ok(self):
         self.assertTrue(m.check_codeql_patch(action_diff()))
@@ -184,6 +203,41 @@ class CheckRuns(unittest.TestCase):
         a.lists[f'/repos/{a.repo}/actions/runs?event=pull_request&head_sha={sha}'][0]['conclusion'] = 'failure'
         with self.assertRaises(m.Blocked):
             m.verify_checks(a, sha, m.CONFIG['autoheal'], False)
+
+    def test_skipped_pr_target_test_is_expected(self):
+        a, sha = sample_api(require_pipeline=True)
+        add_skipped_target_test(a, sha)
+        m.verify_checks(a, sha, m.CONFIG['autoheal'], True)
+
+    def test_unverified_skipped_test_still_blocks(self):
+        a, sha = sample_api(require_pipeline=True)
+        add_skipped_target_test(a, sha)
+        a.lists[f'/repos/{a.repo}/commits/{sha}/check-runs'][-1]['details_url'] = None
+        with self.assertRaises(m.Blocked):
+            m.verify_checks(a, sha, m.CONFIG['autoheal'], True)
+
+    def test_skipped_test_wrong_workflow_blocks(self):
+        a, sha = sample_api(require_pipeline=True)
+        path = add_skipped_target_test(a, sha)
+        a.data[path]['path'] = '.github/workflows/unrelated.yml'
+        with self.assertRaises(m.Blocked):
+            m.verify_checks(a, sha, m.CONFIG['autoheal'], True)
+
+    def test_skipped_test_wrong_head_blocks(self):
+        a, sha = sample_api(require_pipeline=True)
+        path = add_skipped_target_test(a, sha)
+        a.data[path]['head_sha'] = '0' * 40
+        with self.assertRaises(m.Blocked):
+            m.verify_checks(a, sha, m.CONFIG['autoheal'], True)
+
+    def test_skipped_required_security_check_still_blocks(self):
+        a, sha = sample_api(require_pipeline=True)
+        add_skipped_target_test(a, sha)
+        for check in a.lists[f'/repos/{a.repo}/commits/{sha}/check-runs']:
+            if check['name'] == 'security / security':
+                check['conclusion'] = 'skipped'
+        with self.assertRaises(m.Blocked):
+            m.verify_checks(a, sha, m.CONFIG['autoheal'], True)
 
     def test_skipped_publication_is_expected(self):
         a, sha = sample_api()
