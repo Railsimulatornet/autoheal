@@ -216,6 +216,31 @@ def enforce_codeql_alignment(api, sha):
         raise Blocked('CodeQL init/analyze/upload-sarif versions do not align')
 
 
+def expected_skipped_target_test(api, head, check):
+    """Accept only a skipped non-required test job from our trusted PR-target gate."""
+    if (check.get('name') != 'test' or check.get('status') != 'completed'
+            or check.get('conclusion') != 'skipped'
+            or (check.get('app') or {}).get('slug') != 'github-actions'):
+        return False
+    link = check.get('details_url') or ''
+    match = re.fullmatch(
+        re.escape(f'https://github.com/{api.repo}/actions/runs/')
+        + r'(\d+)/job/(\d+)', link)
+    if not match or match.group(2) != str(check.get('id')):
+        return False
+    run = api.get(f'/repos/{api.repo}/actions/runs/{match.group(1)}')
+    return (
+        run.get('event') == 'pull_request_target'
+        and run.get('name') == 'Dependabot patch auto-merge'
+        and run.get('path') == '.github/workflows/dependabot-automerge.yml'
+        and run.get('head_sha') == head
+        and run.get('status') == 'completed'
+        and run.get('conclusion') == 'success'
+        and any(pr.get('head', {}).get('sha') == head
+                for pr in run.get('pull_requests', []))
+    )
+
+
 def verify_checks(api, head, config, require_pipeline):
     runs = api.pages(f'/repos/{api.repo}/actions/runs?event=pull_request&head_sha={head}', 'workflow_runs')
     if not runs:
@@ -239,7 +264,9 @@ def verify_checks(api, head, config, require_pipeline):
         if check['status'] != 'completed':
             raise Blocked(f"Check pending: {check['name']}")
         conclusion = check.get('conclusion')
-        if conclusion == 'success' or (conclusion == 'skipped' and check['name'] in SKIPPED_CHECKS):
+        if (conclusion == 'success'
+                or (conclusion == 'skipped' and check['name'] in SKIPPED_CHECKS)
+                or expected_skipped_target_test(api, head, check)):
             continue
         raise Blocked(f"Unsuccessful/non-verifiable check: {check['name']} ({conclusion})")
 
