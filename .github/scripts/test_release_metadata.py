@@ -7,7 +7,7 @@ from release_metadata import REPOSITORY, make_metadata, remote_tag_exists
 class MetadataTests(unittest.TestCase):
     def data(self, **kwargs):
         args = dict(version='1.0.1', event='push', ref='refs/heads/main', repository=REPOSITORY,
-                    tag_exists=False, day='20260927', run='42', attempt='1')
+                    tag_exists=False, day='20260927', run='42', attempt='1', paths=['autoheal.sh'])
         args.update(kwargs)
         return make_metadata(**args)
 
