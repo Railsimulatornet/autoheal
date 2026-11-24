@@ -12,6 +12,10 @@ permissions:
   contents: read
   security-events: write
 
+env:
+  SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+  SOURCE_REF: ${{ github.event_name == 'pull_request' && format('refs/pull/{0}/head', github.event.pull_request.number) || github.ref }}
+
 jobs:
   security:
     runs-on: ubuntu-latest
@@ -19,6 +23,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
       - name: Install validation tools on GitHub runner
         shell: bash
@@ -58,7 +63,7 @@ jobs:
           push: false
           tags: autoheal:ci
           build-args: VERSION=${{ steps.build.outputs.version }}
-          labels: org.opencontainers.image.revision=${{ github.sha }}
+          labels: org.opencontainers.image.revision=${{ env.SOURCE_SHA }}
           outputs: type=oci,dest=${{ runner.temp }}/autoheal-image/image.tar
           provenance: mode=max
           sbom: true
@@ -104,12 +109,16 @@ jobs:
         if: ${{ always() && hashFiles('trivy-results/amd64/trivy.sarif') != '' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
         uses: github/codeql-action/upload-sarif@v4.39.3
         with:
+          sha: ${{ env.SOURCE_SHA }}
+          ref: ${{ env.SOURCE_REF }}
           sarif_file: trivy-results/amd64/trivy.sarif
           category: autoheal-amd64
       - name: Upload ARM64 code scanning results
         if: ${{ always() && hashFiles('trivy-results/arm64/trivy.sarif') != '' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
         uses: github/codeql-action/upload-sarif@v4.39.3
         with:
+          sha: ${{ env.SOURCE_SHA }}
+          ref: ${{ env.SOURCE_REF }}
           sarif_file: trivy-results/arm64/trivy.sarif
           category: autoheal-arm64
       - name: Save complete scan reports
@@ -133,3 +142,4 @@ jobs:
           retention-days: 7
           compression-level: 0
           if-no-files-found: error
+
